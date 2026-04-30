@@ -149,9 +149,9 @@ def _load_model():
             config_update={
                 "data.num_workers": 0,
                 "accelerator": device,
-                "data.video_feature.image.device": "cpu", # Force video extraction to CPU
-                "data.audio_feature.device": "cpu",       # Force audio extraction to CPU
-                "data.text_feature.device": "cpu",        # Force text extraction to CPU
+                "data.video_feature.image.device": device, # Use GPU if available
+                "data.audio_feature.device": device,       # Use GPU if available
+                "data.text_feature.device": device,        # Use GPU if available
             },
         )
         return MODEL
@@ -199,8 +199,8 @@ def _run_prediction(
         if image_path and not video_path and not audio_path:
             try:
                 import easyocr
-                # Force OCR to CPU to save GPU memory
-                reader = easyocr.Reader(["en"], gpu=False)
+                # Use GPU for OCR if available
+                reader = easyocr.Reader(["en"], gpu=(device == "cuda"))
                 result = reader.readtext(image_path, detail=0)
                 extracted_text = " ".join(result).strip() or "Visual content analysis"
             except Exception:
