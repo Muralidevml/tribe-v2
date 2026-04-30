@@ -16,8 +16,10 @@ from pathlib import Path
 import shutil
 import torch
 
-# ── CUDA Memory Management ────────────────────────────────────────────────────
+# ── CUDA Memory Management & Device Detection ─────────────────────────────────
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[INFO] System Device: {DEVICE}")
 
 # ── PosixPath fix for checkpoint loading on Windows ───────────────────────────
 if sys.platform == "win32":
@@ -108,8 +110,7 @@ def _ensure_dummy_video() -> Path:
     if not dummy.exists():
         try:
             from moviepy import ColorClip
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            v_codec = "h264_nvenc" if device == "cuda" else "libx264"
+            v_codec = "h264_nvenc" if DEVICE == "cuda" else "libx264"
 
             clip = ColorClip(size=(64, 64), color=(0, 0, 0), duration=5.0)
             clip.write_videofile(str(dummy), fps=1, codec=v_codec, audio=False, logger=None)
@@ -138,7 +139,7 @@ def _load_model():
             hf_hub_download("facebook/tribev2", "best.ckpt",    local_dir=str(MODEL_FOLDER))
             checkpoint_dir = MODEL_FOLDER
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = DEVICE
         print(f"[INFO] Initializing model on {device} ...")
         
         if device == "cuda":
@@ -203,7 +204,7 @@ def _run_prediction(
             try:
                 import easyocr
                 # Use GPU for OCR if available
-                reader = easyocr.Reader(["en"], gpu=(device == "cuda"))
+                reader = easyocr.Reader(["en"], gpu=(DEVICE == "cuda"))
                 result = reader.readtext(image_path, detail=0)
                 extracted_text = " ".join(result).strip() or "Visual content analysis"
             except Exception:
@@ -213,7 +214,7 @@ def _run_prediction(
             temp_video = CACHE_FOLDER / f"{job_id}_img_anchor.mp4"
             clip = ImageClip(str(image_path), duration=5.0)
             # Use GPU for encoding if available
-            v_codec = "h264_nvenc" if device == "cuda" else "libx264"
+            v_codec = "h264_nvenc" if DEVICE == "cuda" else "libx264"
             
             clip.write_videofile(
                 str(temp_video), fps=10, codec=v_codec,
