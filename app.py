@@ -108,8 +108,11 @@ def _ensure_dummy_video() -> Path:
     if not dummy.exists():
         try:
             from moviepy import ColorClip
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            v_codec = "h264_nvenc" if device == "cuda" else "libx264"
+
             clip = ColorClip(size=(64, 64), color=(0, 0, 0), duration=5.0)
-            clip.write_videofile(str(dummy), fps=1, codec="libx264", audio=False, logger=None)
+            clip.write_videofile(str(dummy), fps=1, codec=v_codec, audio=False, logger=None)
         except Exception as e:
             print(f"[WARN] Could not create dummy video: {e}")
     return dummy
@@ -209,9 +212,13 @@ def _run_prediction(
             from moviepy import ImageClip
             temp_video = CACHE_FOLDER / f"{job_id}_img_anchor.mp4"
             clip = ImageClip(str(image_path), duration=5.0)
+            # Use GPU for encoding if available
+            v_codec = "h264_nvenc" if device == "cuda" else "libx264"
+            
             clip.write_videofile(
-                str(temp_video), fps=10, codec="libx264",
-                audio=False, preset="ultrafast", logger=None,
+                str(temp_video), fps=10, codec=v_codec,
+                audio=False, preset="ultrafast" if v_codec == "libx264" else None, 
+                logger=None,
             )
 
             df = model.get_events_dataframe(video_path=str(temp_video))
