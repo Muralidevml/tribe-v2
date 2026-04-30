@@ -14,6 +14,10 @@ import threading
 import pathlib
 from pathlib import Path
 import shutil
+import torch
+
+# ── CUDA Memory Management ────────────────────────────────────────────────────
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # ── PosixPath fix for checkpoint loading on Windows ───────────────────────────
 if sys.platform == "win32":
@@ -43,8 +47,10 @@ from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# ── Job state store ────────────────────────────────────────────────────────────
+# ── Job state & Global Model ───────────────────────────────────────────────────
 JOBS: dict = {}
+MODEL = None
+MODEL_LOCK = threading.Lock()
 
 # ── Flask setup ────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -110,42 +116,43 @@ def _ensure_dummy_video() -> Path:
 
 
 def _load_model():
-    """
-    Load TribeModel.
-    - If ./model/config.yaml + ./model/best.ckpt exist  → load from local folder.
-    - Otherwise  → download from HuggingFace to ./model/ first, then load.
-    """
-    from tribev2.demo_utils import TribeModel
+    global MODEL
+    with MODEL_LOCK:
+        if MODEL is not None:
+            return MODEL
 
-    config_path = MODEL_FOLDER / "config.yaml"
-    ckpt_path   = MODEL_FOLDER / "best.ckpt"
+        from tribev2.demo_utils import TribeModel
+        config_path = MODEL_FOLDER / "config.yaml"
+        ckpt_path   = MODEL_FOLDER / "best.ckpt"
 
-    if config_path.exists() and ckpt_path.exists():
-        # ── Local load (fast, no internet needed) ─────────────────────────
-        print("[INFO] Loading model from local ./model folder ...")
-        checkpoint_dir = MODEL_FOLDER
-    else:
-        # ── Download once to ./model/ ──────────────────────────────────────
-        print("[INFO] Downloading model weights to ./model/ (one-time) ...")
-        from huggingface_hub import hf_hub_download
-        hf_hub_download("facebook/tribev2", "config.yaml",  local_dir=str(MODEL_FOLDER))
-        hf_hub_download("facebook/tribev2", "best.ckpt",    local_dir=str(MODEL_FOLDER))
-        checkpoint_dir = MODEL_FOLDER
+        if config_path.exists() and ckpt_path.exists():
+            print("[INFO] Loading model from local ./model folder ...")
+            checkpoint_dir = MODEL_FOLDER
+        else:
+            print("[INFO] Downloading model weights ...")
+            from huggingface_hub import hf_hub_download
+            hf_hub_download("facebook/tribev2", "config.yaml",  local_dir=str(MODEL_FOLDER))
+            hf_hub_download("facebook/tribev2", "best.ckpt",    local_dir=str(MODEL_FOLDER))
+            checkpoint_dir = MODEL_FOLDER
 
-    import torch
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[INFO] Using device: {device}")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"[INFO] Initializing model on {device} ...")
+        
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
-    model = TribeModel.from_pretrained(
-        checkpoint_dir,
-        cache_folder=str(CACHE_FOLDER),
-        device=device,
-        config_update={
-            "data.num_workers": 0,
-            "accelerator": device,
-        },
-    )
-    return model
+        MODEL = TribeModel.from_pretrained(
+            checkpoint_dir,
+            cache_folder=str(CACHE_FOLDER),
+            device=device,
+            config_update={
+                "data.num_workers": 0,
+                "accelerator": device,
+                "extractors.video.device": "cpu", # Force video extraction to CPU
+                "extractors.audio.device": "cpu", # Force audio extraction to CPU
+            },
+        )
+        return MODEL
 
 
 def _run_prediction(
@@ -190,7 +197,8 @@ def _run_prediction(
         if image_path and not video_path and not audio_path:
             try:
                 import easyocr
-                reader = easyocr.Reader(["en"])
+                # Force OCR to CPU to save GPU memory
+                reader = easyocr.Reader(["en"], gpu=False)
                 result = reader.readtext(image_path, detail=0)
                 extracted_text = " ".join(result).strip() or "Visual content analysis"
             except Exception:
@@ -263,6 +271,9 @@ def _run_prediction(
 
         JOBS[job_id]["progress"] = 60
         JOBS[job_id]["status"]   = "predicting"
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         preds, segments = model.predict(events=df)
 
