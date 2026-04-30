@@ -49,6 +49,68 @@ from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
+# ── Monkey-patch TRIBE v2 for CPU Stability ───────────────────────────────────
+try:
+    from tribev2.eventstransforms import ExtractWordsFromAudio
+    import subprocess, tempfile, json, torch
+    import pandas as pd
+    
+    @staticmethod
+    def _patched_get_transcript(wav_filename, language):
+        language_codes = dict(english="en", french="fr", spanish="es", dutch="nl", chinese="zh")
+        if language not in language_codes: raise ValueError(f"Language {language} not supported")
+
+        # FIX: Ensure we use compatible compute types
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        # We force int8 on CPU and even on CUDA if it fails, we want a safe mode
+        compute_type = "float16" if device == "cuda" else "int8"
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            cmd = [
+                "uvx", "whisperx", str(wav_filename),
+                "--model", "large-v3",
+                "--language", language_codes[language],
+                "--device", device,
+                "--compute_type", compute_type,
+                "--batch_size", "16",
+                "--align_model", "WAV2VEC2_ASR_LARGE_LV60K_960H" if language == "english" else "",
+                "--output_dir", output_dir,
+                "--output_format", "json",
+            ]
+            cmd = [c for c in cmd if c]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                # If float16 failed on CUDA, try int8 as a last resort
+                if "float16" in result.stderr and compute_type == "float16":
+                    print("[WARN] float16 failed, retrying with int8...")
+                    cmd[cmd.index("--compute_type") + 1] = "int8"
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    raise RuntimeError(f"whisperx failed:\n{result.stderr}")
+
+            json_path = Path(output_dir) / f"{wav_filename.stem}.json"
+            transcript_data = json.loads(json_path.read_text())
+
+        words = []
+        for i, segment in enumerate(transcript_data["segments"]):
+            for word in segment.get("words", []):
+                if "start" in word:
+                    words.append({
+                        "text": word["word"].strip(),
+                        "start": word["start"],
+                        "duration": word["end"] - word["start"],
+                        "sequence_id": i,
+                        "sentence": segment["text"].strip()
+                    })
+        return pd.DataFrame(words)
+
+    # Apply the patch
+    ExtractWordsFromAudio._get_transcript_from_audio = _patched_get_transcript
+    print("[INFO] Applied stability patch to ExtractWordsFromAudio")
+except Exception as e:
+    print(f"[WARN] Could not patch ExtractWordsFromAudio: {e}")
+
 # ── Job state & Global Model ───────────────────────────────────────────────────
 JOBS: dict = {}
 MODEL = None
