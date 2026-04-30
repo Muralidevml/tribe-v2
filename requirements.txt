@@ -1,0 +1,26 @@
+# NeuroAds — Minimal dependencies
+# Core deep learning libraries (torch, transformers, exca) are handled by the TRIBE v2 install.
+
+# Web framework
+flask>=3.0.0
+flask-cors>=4.0.0
+werkzeug>=3.0.0
+
+# Data & numerics (using ranges for better compatibility)
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Visualisation
+matplotlib>=3.8.0
+plotly>=5.20.0
+
+# Video / audio / image
+moviepy>=1.0.3
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# OCR (optional — for image-only mode)
+easyocr>=1.7.0
+
+# TRIBE v2 itself is installed via git in the notebook/setup script
+#pip install "tribev2[plotting] @ git+https://github.com/facebookresearch/tribev2.gi

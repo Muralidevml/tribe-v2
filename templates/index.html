@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NeuroAds – Brain Response Predictor</title>
+  <meta name="description"
+    content="Predict how your ad activations the human brain using Meta's TRIBE v2 fMRI model." />
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <!-- jsPDF -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+
+<body>
+  <!-- Neural Backdrop -->
+  <div class="neural-grid"></div>
+
+  <!-- ══════════════════════════════════════════════════════════
+     HEADER
+  ══════════════════════════════════════════════════════════ -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">
+        <img src="/static/logo/obbserv.ai-2.png" alt="Obbserv" class="logo-img">
+        NeuroAds
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="tech-badge">TRIBE v2 Neural Core</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- ── Hero ──────────────────────────────────────────────── -->
+    <section class="hero fade-up">
+      <div class="hero-tag">
+        <span>⚡</span> Next-Gen Neuroscience Terminal
+      </div>
+      <h1>
+        Visualise the <span class="grad">Neural Pulse</span><br />
+        of Your Creative Content
+      </h1>
+      <p>
+        Harnessing Meta FAIR's **TRIBE v2** foundation model to predict high-resolution fMRI 
+        brain responses. Decipher attention, memory encoding, and emotional engagement 
+        before you spend a single dollar on media.
+      </p>
+    </section>
+
+    <!-- Error box -->
+    <div id="error-box" class="error-box"></div>
+
+    <!-- ── Upload Terminal ────────────────────────────────────── -->
+    <section id="upload-section">
+      <div class="card fade-up">
+        <div class="card-header">
+          <div class="card-icon icon-purple">🧬</div>
+          <div>
+            <h2>Data Ingestion Terminal</h2>
+            <p style="font-size:0.8rem;color:var(--text-dim);margin-top:2px">Upload multimodal assets for cortical mapping</p>
+          </div>
+        </div>
+
+        <form id="upload-form" enctype="multipart/form-data">
+          <div class="unified-upload-container">
+            <label class="unified-upload-zone" id="unified-zone" for="unified-input">
+              <input type="file" id="unified-input" name="files" multiple accept=".mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.ogg,.flac,.m4a,.txt,.png,.jpg,.jpeg,.webp" />
+              <div class="upload-content" id="upload-content-default">
+                <span class="upload-icon-large">📡</span>
+                <div class="upload-text">
+                  <h3>Synchronise Assets</h3>
+                  <p>Drop Video, Audio, or Text files here</p>
+                  <div class="upload-hint">Supported: MP4, WAV, MP3, TXT, PNG, JPG</div>
+                </div>
+              </div>
+              <div id="upload-preview" class="upload-preview-container" style="display:none"></div>
+            </label>
+
+          </div>
+
+          <div class="script-section-container">
+            <button type="button" id="toggle-script-btn" class="btn-toggle-script">
+              <span class="btn-icon">📝</span>
+              <span>Input Copywriting Script / Voiceover</span>
+              <span class="chevron">▼</span>
+            </button>
+            <div id="script-collapsible" class="script-collapsible">
+              <div style="margin-top:1.5rem; padding: 1.5rem; background: rgba(255,255,255,0.02); border-radius: 16px;">
+                <textarea id="text-input" placeholder="Paste script content here for semantic cortex analysis..."></textarea>
+                <div style="display:flex;justify-content:space-between;margin-top:8px;">
+                  <span style="font-size:0.7rem;color:var(--accent-success);">Neural text analysis enabled</span>
+                  <span id="char-count" style="font-size:0.7rem;color:var(--text-dim);">0 characters</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="token-row">
+            <div class="input-group">
+              <label for="hf-token">HuggingFace Auth Token</label>
+              <input type="password" id="hf-token" name="hf_token" placeholder="hf_..." />
+            </div>
+            <button type="submit" id="submit-btn" class="btn btn-primary">
+              🧠 Run Neural Prediction
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ── Progress Monitor ──────────────────────────────────── -->
+    <section id="progress-section">
+      <div class="card progress-card">
+        <div class="card-header" style="border:none; padding-bottom:0">
+          <div class="card-icon icon-cyan pulse">🌀</div>
+          <div>
+            <h3>Cortical Analysis in Progress</h3>
+            <p id="progress-status" style="font-size:0.8rem;color:var(--text-dim)">Initializing Inference Engine</p>
+          </div>
+          <span id="progress-pct" style="margin-left:auto; font-size:2rem; font-weight:900; color:var(--accent-secondary)">0%</span>
+        </div>
+        <div style="padding:2rem">
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="progress-fill"></div>
+          </div>
+          <div class="status-steps">
+            <span class="step-chip" data-step="queued">Queue</span>
+            <span class="step-chip" data-step="loading_model">Model Load</span>
+            <span class="step-chip" data-step="extracting_events">Feature Extraction</span>
+            <span class="step-chip" data-step="predicting">Neural Prediction</span>
+            <span class="step-chip" data-step="analysing">Marketing Audit</span>
+            <span class="step-chip" data-step="done">Complete ✓</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Results Terminal ──────────────────────────────────── -->
+    <section id="results-section">
+      <nav class="results-nav fade-up">
+        <div class="nav-container">
+          <a href="#results-summary" class="nav-link">
+            <span class="nav-dot"></span> Strategic Summary
+          </a>
+          <a href="#results-charts" class="nav-link">
+            <span class="nav-dot"></span> Neural Mapping
+          </a>
+          <a href="#results-hooks" class="nav-link">
+            <span class="nav-dot"></span> Attention Hooks
+          </a>
+          <a href="#results-logs" class="nav-link">
+            <span class="nav-dot"></span> Signal Logs
+          </a>
+        </div>
+      </nav>
+
+      <div style="text-align:center;margin: 4rem 0" class="fade-up">
+        <p style="font-size:0.75rem; color:var(--text-dim); letter-spacing:2px; margin-bottom:12px">CORTICAL ENGAGEMENT PROFILE</p>
+        <span id="engagement-badge" class="engagement-badge eng-high">Analyzing...</span>
+      </div>
+
+      <div class="kpi-grid fade-up">
+        <div class="kpi-card">
+          <div class="kpi-label">Neural Attention</div>
+          <div class="kpi-value" id="kpi-avg" style="color:var(--accent-primary)">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Peak Pulse</div>
+          <div class="kpi-value" id="kpi-peak" style="color:var(--accent-secondary)">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Hook Strength</div>
+          <div class="kpi-value" id="kpi-hook" style="color:var(--accent-success)">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Temporal Steps</div>
+          <div class="kpi-value" id="kpi-timesteps" style="color:var(--accent-tertiary)">—</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Vertices</div>
+          <div class="kpi-value" id="kpi-vertices" style="color:var(--accent-warning)">—</div>
+        </div>
+      </div>
+
+      <div id="results-charts" class="charts-grid">
+        <div class="card chart-container fade-up">
+          <div class="chart-title">📡 Attention Envelope (TR-Resolution)</div>
+          <canvas id="chart-attention" height="220"></canvas>
+        </div>
+        <div class="card chart-container fade-up">
+          <div class="chart-title">📍 Regional Cortical Activation</div>
+          <canvas id="chart-roi" height="220"></canvas>
+        </div>
+        <div class="card chart-container fade-up">
+          <div class="chart-title">📶 Segment-wise Engagement Density</div>
+          <canvas id="chart-segments" height="220"></canvas>
+        </div>
+        <div class="card chart-container fade-up">
+          <div class="chart-title">🕸️ Multimodal Engagement Topology</div>
+          <canvas id="chart-radar" height="220"></canvas>
+        </div>
+      </div>
+
+      <!-- Insights -->
+      <div id="results-summary" class="card fade-up" style="margin-bottom:2rem">
+        <div class="card-header">
+          <div class="card-icon icon-gold">💡</div>
+          <h3>Strategic Summary</h3>
+        </div>
+        <div id="insights-wrap" class="insights-grid"></div>
+      </div>
+
+      <!-- Hooks -->
+      <div id="results-hooks" class="card fade-up" style="margin-bottom:2rem">
+        <div class="card-header">
+          <div class="card-icon icon-pink">🔥</div>
+          <h3>Attention Hooks</h3>
+        </div>
+        <div id="hooks-list" class="hooks-list"></div>
+      </div>
+
+      <!-- Table -->
+      <div id="results-logs" class="card fade-up" style="margin-bottom:4rem">
+        <div class="card-header">
+          <div class="card-icon icon-cyan">🛰️</div>
+          <h3>Signal Logs</h3>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>T-Start</th>
+                <th>Duration</th>
+                <th>Content</th>
+                <th>Signal Context</th>
+              </tr>
+            </thead>
+            <tbody id="events-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="text-align:center; margin-bottom:4rem" class="fade-up">
+        <button id="download-pdf-btn" onclick="downloadPDF()" class="btn btn-primary">
+          💾 Generate Neural Report (PDF)
+        </button>
+      </div>
+
+      <footer style="text-align:center; padding-bottom:6rem; color:var(--text-dark); font-size:0.7rem;">
+        <p>Powered by TRIBE v2 Multimodal Encoder (Meta FAIR Research). fsaverage5 Standard cortical mesh analysis.</p>
+        <p style="margin-top:8px">Neural activity predictions are subject to hemodynamic lag correction.</p>
+      </footer>
+    </section>
+  </main>
+
+  <script src="/static/js/main.js"></script>
+</body>
+
+</html>

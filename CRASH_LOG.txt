@@ -1,0 +1,77 @@
+Traceback (most recent call last):
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\video_processing_utils.py", line 614, in get_video_processor_dict
+    resolved_processor_file = cached_file(
+                              ^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\utils\hub.py", line 278, in cached_file
+    file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\utils\hub.py", line 512, in cached_files
+    raise e
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\utils\hub.py", line 422, in cached_files
+    hf_hub_download(
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\utils\_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\file_download.py", line 997, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\file_download.py", line 1130, in _hf_hub_download_to_cache_dir
+    _get_metadata_or_catch_error(
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\file_download.py", line 1669, in _get_metadata_or_catch_error
+    metadata = get_hf_file_metadata(
+               ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\utils\_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\file_download.py", line 1591, in get_hf_file_metadata
+    response = _httpx_follow_relative_redirects_with_backoff(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\utils\_http.py", line 685, in _httpx_follow_relative_redirects_with_backoff
+    response = http_backoff(
+               ^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\utils\_http.py", line 559, in http_backoff
+    return next(
+           ^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\huggingface_hub\utils\_http.py", line 467, in _http_backoff_base
+    response = client.request(method=method, url=url, **kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\httpx\_client.py", line 825, in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\httpx\_client.py", line 901, in send
+    raise RuntimeError("Cannot send a request, as the client has been closed.")
+RuntimeError: Cannot send a request, as the client has been closed.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\TRIBE V2\app.py", line 241, in _run_prediction
+    preds, segments = model.predict(events=df)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\tribev2\demo_utils.py", line 362, in predict
+    loader = self.data.get_loaders(events=events, split_to_build="all")["all"]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\tribev2\main.py", line 216, in get_loaders
+    extractor.prepare(events)
+  File "D:\TRIBE V2\venv\Lib\site-packages\neuralset\extractors\base.py", line 202, in prepare
+    self._get_data(events)
+  File "D:\TRIBE V2\venv\Lib\site-packages\exca\map.py", line 350, in _method_override
+    return self._method_override_futures(items)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\exca\map.py", line 472, in _method_override_futures
+    out = self._call_and_store(
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\exca\map.py", line 541, in _call_and_store
+    for item, output in in_out:
+  File "D:\TRIBE V2\venv\Lib\site-packages\neuralset\extractors\video.py", line 257, in _get_data
+    model = _HFVideoModel(
+            ^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\neuralset\extractors\video.py", line 399, in __init__
+    self.processor = Processor.from_pretrained(model_name, **processor_extra)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\models\auto\video_processing_auto.py", line 314, in from_pretrained
+    config_dict, _ = BaseVideoProcessor.get_video_processor_dict(pretrained_model_name_or_path, **kwargs)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\TRIBE V2\venv\Lib\site-packages\transformers\video_processing_utils.py", line 656, in get_video_processor_dict
+    raise OSError(
+OSError: Can't load video processor for 'facebook/vjepa2-vitg-fpc64-256'. If you were trying to load it from 'https://huggingface.co/models', make sure you don't have a local directory with the same name. Otherwise, make sure 'facebook/vjepa2-vitg-fpc64-256' is the correct path to a directory containing a video_preprocessor_config.json file
