@@ -141,6 +141,7 @@ def _load_model():
         if device == "cuda":
             torch.cuda.empty_cache()
 
+        # The correct config keys for TribeModel extractors:
         MODEL = TribeModel.from_pretrained(
             checkpoint_dir,
             cache_folder=str(CACHE_FOLDER),
@@ -148,8 +149,9 @@ def _load_model():
             config_update={
                 "data.num_workers": 0,
                 "accelerator": device,
-                "extractors.video.device": "cpu", # Force video extraction to CPU
-                "extractors.audio.device": "cpu", # Force audio extraction to CPU
+                "data.video_feature.image.device": "cpu", # Force video extraction to CPU
+                "data.audio_feature.device": "cpu",       # Force audio extraction to CPU
+                "data.text_feature.device": "cpu",        # Force text extraction to CPU
             },
         )
         return MODEL
