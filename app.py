@@ -15,11 +15,10 @@ import pathlib
 from pathlib import Path
 import shutil
 import torch
+import gc
 
-# ── CUDA Memory Management & Device Detection ─────────────────────────────────
+# ── CUDA Memory Management ────────────────────────────────────────────────────
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"[INFO] System Device: {DEVICE}")
 
 # ── PosixPath fix for checkpoint loading on Windows ───────────────────────────
 if sys.platform == "win32":
@@ -49,72 +48,11 @@ from flask import Flask, request, jsonify, send_from_directory, render_template
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
-# ── Monkey-patch TRIBE v2 for CPU Stability ───────────────────────────────────
-try:
-    from tribev2.eventstransforms import ExtractWordsFromAudio
-    import subprocess, tempfile, json, torch
-    import pandas as pd
-    
-    @staticmethod
-    def _patched_get_transcript(wav_filename, language):
-        language_codes = dict(english="en", french="fr", spanish="es", dutch="nl", chinese="zh")
-        if language not in language_codes: raise ValueError(f"Language {language} not supported")
-
-        # FIX: Ensure we use compatible compute types
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        # We force int8 on CPU and even on CUDA if it fails, we want a safe mode
-        compute_type = "float16" if device == "cuda" else "int8"
-
-        with tempfile.TemporaryDirectory() as output_dir:
-            cmd = [
-                "uvx", "whisperx", str(wav_filename),
-                "--model", "large-v3",
-                "--language", language_codes[language],
-                "--device", device,
-                "--compute_type", compute_type,
-                "--batch_size", "16",
-                "--align_model", "WAV2VEC2_ASR_LARGE_LV60K_960H" if language == "english" else "",
-                "--output_dir", output_dir,
-                "--output_format", "json",
-            ]
-            cmd = [c for c in cmd if c]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                # If float16 failed on CUDA, try int8 as a last resort
-                if "float16" in result.stderr and compute_type == "float16":
-                    print("[WARN] float16 failed, retrying with int8...")
-                    cmd[cmd.index("--compute_type") + 1] = "int8"
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                if result.returncode != 0:
-                    raise RuntimeError(f"whisperx failed:\n{result.stderr}")
-
-            json_path = Path(output_dir) / f"{wav_filename.stem}.json"
-            transcript_data = json.loads(json_path.read_text())
-
-        words = []
-        for i, segment in enumerate(transcript_data["segments"]):
-            for word in segment.get("words", []):
-                if "start" in word:
-                    words.append({
-                        "text": word["word"].strip(),
-                        "start": word["start"],
-                        "duration": word["end"] - word["start"],
-                        "sequence_id": i,
-                        "sentence": segment["text"].strip()
-                    })
-        return pd.DataFrame(words)
-
-    # Apply the patch
-    ExtractWordsFromAudio._get_transcript_from_audio = _patched_get_transcript
-    print("[INFO] Applied stability patch to ExtractWordsFromAudio")
-except Exception as e:
-    print(f"[WARN] Could not patch ExtractWordsFromAudio: {e}")
-
 # ── Job state & Global Model ───────────────────────────────────────────────────
 JOBS: dict = {}
 MODEL = None
 MODEL_LOCK = threading.Lock()
+PREDICTION_LOCK = threading.Lock() # Ensure only one job uses GPU at a time
 
 # ── Flask setup ────────────────────────────────────────────────────────────────
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -172,10 +110,8 @@ def _ensure_dummy_video() -> Path:
     if not dummy.exists():
         try:
             from moviepy import ColorClip
-            v_codec = "h264_nvenc" if DEVICE == "cuda" else "libx264"
-
             clip = ColorClip(size=(64, 64), color=(0, 0, 0), duration=5.0)
-            clip.write_videofile(str(dummy), fps=1, codec=v_codec, audio=False, logger=None)
+            clip.write_videofile(str(dummy), fps=1, codec="libx264", audio=False, logger=None)
         except Exception as e:
             print(f"[WARN] Could not create dummy video: {e}")
     return dummy
@@ -201,13 +137,14 @@ def _load_model():
             hf_hub_download("facebook/tribev2", "best.ckpt",    local_dir=str(MODEL_FOLDER))
             checkpoint_dir = MODEL_FOLDER
 
-        device = DEVICE
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[INFO] Initializing model on {device} ...")
         
         if device == "cuda":
             torch.cuda.empty_cache()
+            gc.collect()
 
-        # The correct config keys for TribeModel extractors:
+        # Use 'device' (cuda or cpu) for everything
         MODEL = TribeModel.from_pretrained(
             checkpoint_dir,
             cache_folder=str(CACHE_FOLDER),
@@ -215,9 +152,9 @@ def _load_model():
             config_update={
                 "data.num_workers": 0,
                 "accelerator": device,
-                "data.video_feature.image.device": device, # Use GPU if available
-                "data.audio_feature.device": device,       # Use GPU if available
-                "data.text_feature.device": device,        # Use GPU if available
+                "data.video_feature.image.device": device, 
+                "data.audio_feature.device": device,       
+                "data.text_feature.device": device,        
             },
         )
         return MODEL
@@ -232,63 +169,93 @@ def _run_prediction(
     hf_token,
 ):
     """Worker function executed in a background thread."""
-    try:
-        JOBS[job_id]["status"]   = "loading_model"
-        JOBS[job_id]["progress"] = 5
-
-        # ── Optional HuggingFace login ─────────────────────────────────────
-        if hf_token:
-            from huggingface_hub import login
-            login(token=hf_token)
-
-        # ── Imports ────────────────────────────────────────────────────────
-        import pandas as pd
-        import numpy as np
-        from neuralset.events.utils import standardize_events
-        from neuralset.events.transforms import (
-            AddText,
-            AddSentenceToWords,
-            AddContextToWords,
-        )
-
-        JOBS[job_id]["progress"] = 10
-
-        # ── Load / cache model ─────────────────────────────────────────────
-        model = _load_model()
-
-        JOBS[job_id]["progress"] = 40
-        JOBS[job_id]["status"]   = "extracting_events"
-
-        # ── Multimodal data extraction ─────────────────────────────────────
-
-        # Case A: Image only
-        if image_path and not video_path and not audio_path:
-            try:
-                import easyocr
-                # Use GPU for OCR if available
-                reader = easyocr.Reader(["en"], gpu=(DEVICE == "cuda"))
-                result = reader.readtext(image_path, detail=0)
-                extracted_text = " ".join(result).strip() or "Visual content analysis"
-            except Exception:
-                extracted_text = "Visual content analysis"
-
-            from moviepy import ImageClip
-            temp_video = CACHE_FOLDER / f"{job_id}_img_anchor.mp4"
-            clip = ImageClip(str(image_path), duration=5.0)
-            # Use GPU for encoding if available
-            v_codec = "h264_nvenc" if DEVICE == "cuda" else "libx264"
+    with PREDICTION_LOCK:
+        try:
+            JOBS[job_id]["status"]   = "loading_model"
+            JOBS[job_id]["progress"] = 5
             
-            clip.write_videofile(
-                str(temp_video), fps=10, codec=v_codec,
-                audio=False, preset="ultrafast" if v_codec == "libx264" else None, 
-                logger=None,
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            # ── Optional HuggingFace login ─────────────────────────────────────
+            if hf_token:
+                from huggingface_hub import login
+                login(token=hf_token)
+
+            # ── Imports ────────────────────────────────────────────────────────
+            import pandas as pd
+            import numpy as np
+            from neuralset.events.utils import standardize_events
+            from neuralset.events.transforms import (
+                AddText,
+                AddSentenceToWords,
+                AddContextToWords,
             )
 
-            df = model.get_events_dataframe(video_path=str(temp_video))
+            JOBS[job_id]["progress"] = 10
 
-            words = extracted_text.split()
-            if words:
-                dur = 5.0 / len(words)
+            # ── Load / cache model ─────────────────────────────────────────────
+            model = _load_model()
+
+            JOBS[job_id]["progress"] = 40
+            JOBS[job_id]["status"]   = "extracting_events"
+
+            # ── Multimodal data extraction ─────────────────────────────────────
+
+            # Case A: Image only
+            if image_path and not video_path and not audio_path:
+                try:
+                    import easyocr
+                    # Force OCR to CPU to save GPU memory
+                    reader = easyocr.Reader(["en"], gpu=False)
+                    result = reader.readtext(image_path, detail=0)
+                    extracted_text = " ".join(result).strip() or "Visual content analysis"
+                except Exception:
+                    extracted_text = "Visual content analysis"
+
+                from moviepy import ImageClip
+                temp_video = CACHE_FOLDER / f"{job_id}_img_anchor.mp4"
+                clip = ImageClip(str(image_path), duration=5.0)
+                clip.write_videofile(
+                    str(temp_video), fps=10, codec="libx264",
+                    audio=False, preset="ultrafast", logger=None,
+                )
+
+                df = model.get_events_dataframe(video_path=str(temp_video))
+
+                words = extracted_text.split()
+                if words:
+                    dur = 5.0 / len(words)
+                    new_words = [
+                        {
+                            "type": "Word", "text": w,
+                            "start": i * dur, "duration": dur,
+                            "timeline": "default", "subject": "default",
+                        }
+                        for i, w in enumerate(words)
+                    ]
+                    df = df[df.type != "Word"]
+                    df = pd.concat([df, pd.DataFrame(new_words)], ignore_index=True)
+                    df = standardize_events(df)
+                    df = AddText()(df)
+                    df = AddSentenceToWords(max_unmatched_ratio=0.99)(df)
+                    df = AddContextToWords(sentence_only=False, max_context_len=1024, split_field="")(df)
+
+            # Case B: Text only
+            elif text_path and not video_path and not audio_path:
+                try:
+                    with open(text_path, "r", encoding="utf-8") as f:
+                        script = f.read().strip()
+                except Exception:
+                    script = "Marketing script analysis"
+
+                dummy = _ensure_dummy_video()
+
+                df = model.get_events_dataframe(video_path=str(dummy))
+
+                words = script.split() or ["(empty)"]
+                dur   = 5.0 / len(words)
                 new_words = [
                     {
                         "type": "Word", "text": w,
@@ -304,74 +271,54 @@ def _run_prediction(
                 df = AddSentenceToWords(max_unmatched_ratio=0.99)(df)
                 df = AddContextToWords(sentence_only=False, max_context_len=1024, split_field="")(df)
 
-        # Case B: Text only
-        elif text_path and not video_path and not audio_path:
+            # Case C: Video / Audio / mixed
+            else:
+                df = model.get_events_dataframe(
+                    video_path=video_path,
+                    audio_path=audio_path,
+                    text_path=text_path,
+                )
+
+            JOBS[job_id]["progress"] = 60
+            JOBS[job_id]["status"]   = "predicting"
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                gc.collect()
+
+            preds, segments = model.predict(events=df)
+
+            JOBS[job_id]["progress"] = 80
+            JOBS[job_id]["status"]   = "analysing"
+
+            results = _analyse(preds, segments, df)
+
+            JOBS[job_id]["progress"] = 100
+            JOBS[job_id]["status"]   = "done"
+            JOBS[job_id]["results"]  = results
+
+        except OSError as e:
+            trace = traceback.format_exc()
+            print(f"[ERROR] I/O Error during prediction: {e}")
             try:
-                with open(text_path, "r", encoding="utf-8") as f:
-                    script = f.read().strip()
-            except Exception:
-                script = "Marketing script analysis"
-
-            dummy = _ensure_dummy_video()
-
-            df = model.get_events_dataframe(video_path=str(dummy))
-
-            words = script.split() or ["(empty)"]
-            dur   = 5.0 / len(words)
-            new_words = [
-                {
-                    "type": "Word", "text": w,
-                    "start": i * dur, "duration": dur,
-                    "timeline": "default", "subject": "default",
-                }
-                for i, w in enumerate(words)
-            ]
-            df = df[df.type != "Word"]
-            df = pd.concat([df, pd.DataFrame(new_words)], ignore_index=True)
-            df = standardize_events(df)
-            df = AddText()(df)
-            df = AddSentenceToWords(max_unmatched_ratio=0.99)(df)
-            df = AddContextToWords(sentence_only=False, max_context_len=1024, split_field="")(df)
-
-        # Case C: Video / Audio / mixed
-        else:
-            df = model.get_events_dataframe(
-                video_path=video_path,
-                audio_path=audio_path,
-                text_path=text_path,
-            )
-
-        JOBS[job_id]["progress"] = 60
-        JOBS[job_id]["status"]   = "predicting"
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        preds, segments = model.predict(events=df)
-
-        JOBS[job_id]["progress"] = 80
-        JOBS[job_id]["status"]   = "analysing"
-
-        results = _analyse(preds, segments, df)
-
-        JOBS[job_id]["progress"] = 100
-        JOBS[job_id]["status"]   = "done"
-        JOBS[job_id]["results"]  = results
-
-    except OSError as e:
-        trace = traceback.format_exc()
-        print(f"[ERROR] I/O Error during prediction: {e}")
-        try:
-            crash_log = BASE_DIR / "CRASH_LOG.txt"
-            with open(crash_log, "w", encoding="utf-8") as f:
-                f.write(f"I/O Error: {e}\n\n{trace}")
-        except:
-            pass
-        JOBS[job_id]["status"] = "error"
-        JOBS[job_id]["error"]  = f"Input/Output Error (Disk full or Drive issue): {e}"
-    except Exception as exc:
-        trace = traceback.format_exc()
-        print(f"[ERROR] General Error: {exc}")
+                crash_log = BASE_DIR / "CRASH_LOG.txt"
+                with open(crash_log, "w", encoding="utf-8") as f:
+                    f.write(f"I/O Error: {e}\n\n{trace}")
+            except:
+                pass
+            JOBS[job_id]["status"] = "error"
+            JOBS[job_id]["error"]  = f"Input/Output Error (Disk full or Drive issue): {e}"
+        except Exception as exc:
+            trace = traceback.format_exc()
+            print(f"[ERROR] General Error: {exc}")
+            try:
+                crash_log = BASE_DIR / "CRASH_LOG.txt"
+                with open(crash_log, "w", encoding="utf-8") as f:
+                    f.write(trace)
+            except:
+                pass
+            JOBS[job_id]["status"] = "error"
+            JOBS[job_id]["error"]  = str(exc)
 
 
 def _analyse(preds, segments, df) -> dict:
